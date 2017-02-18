@@ -43,6 +43,7 @@ typedef struct
     uint32_t    real_size;
     uint32_t    compressed_size;
     bool        compressed;
+    uint8_t     packing[3]; // Unused explicit packing
 } frame_header_t;
 
 static void write_frame(Mat& frame, uint8_t* memory, uint32_t max_size)
