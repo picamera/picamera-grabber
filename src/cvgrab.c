@@ -37,17 +37,21 @@ static void usage(FILE *fp, int argc, char **argv)
          "-d | --device index  Video device index\n"
          "-x | --xres          X resolution\n"
          "-y | --yres          Y resolution\n"
+         "-l | --lz4           Use LZ4 compression\n"
+         "-j | --jpeg          Use JPEG compression (default)\n"
          "-h | --help          Print this message\n"
          "",
          argv[0]);
 }
 
-static const char short_options[] = "d:x:y:h";
+static const char short_options[] = "d:x:y:ljh";
 
 static const struct option long_options[] = {
     { "device", required_argument, NULL, 'd' },
     { "xres",   required_argument, NULL, 'x' },
     { "yres",   required_argument, NULL, 'y' },
+    { "lz4",    required_argument, NULL, 'l' },
+    { "jpeg",   required_argument, NULL, 'j' },
     { "help",   no_argument,       NULL, 'h' },
     { 0,        0,                 0,    0 }
 };
@@ -57,6 +61,7 @@ int main(int argc, char** argv)
     int32_t device = -1;
     int32_t xres = -1;
     int32_t yres = -1;
+    compression_t comp_type = CompNone;
 
     for (;;)
     {
@@ -100,6 +105,14 @@ int main(int argc, char** argv)
                 }
                 break;
 
+            case 'l':
+                comp_type = CompLZ4;
+                break;
+
+            case 'j':
+                comp_type = CompJPEG;
+                break;
+
             case 'h':
                 usage(stdout, argc, argv);
                 exit(EXIT_SUCCESS);
@@ -118,7 +131,8 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-    if (grabber_open(device, xres, yres))
+
+    if (grabber_open(device, xres, yres, comp_type))
     {
         struct sigaction sigIntHandler;
         sigIntHandler.sa_handler = sig_int_handler;

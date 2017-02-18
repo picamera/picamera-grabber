@@ -1,3 +1,4 @@
+#include "grabber.h"
 #include <opencv2/opencv.hpp>
 #include <time.h>
 #include <iostream>
@@ -6,6 +7,7 @@
 #include "ipc.h"
 #include <semaphore.h>
 #include "lz4.h"
+#include <turbojpeg.h>
 
 using namespace std;
 using namespace cv;
@@ -15,6 +17,7 @@ static volatile bool can_run = false;
 static volatile bool running = false;
 static uint32_t xres = 0;
 static uint32_t yres = 0;
+static uint8_t compression = CompNone;
 
 #define NUM_FRAME_SLOTS 2
 
@@ -34,6 +37,7 @@ typedef struct
     uint32_t    memory_size;
     uint32_t    xres;
     uint32_t    yres;
+    uint32_t    format;
     uint32_t    frames[NUM_FRAME_SLOTS];
     uint32_t    current_slot;
 } mem_header_t;
@@ -42,9 +46,17 @@ typedef struct
 {
     uint32_t    real_size;
     uint32_t    compressed_size;
-    bool        compressed;
+    uint8_t     compressed;
     uint8_t     packing[3]; // Unused explicit packing
 } frame_header_t;
+
+static inline void store_le32(uint8_t *c, uint32_t x)
+{
+    c[0] = x & 0xff;
+    c[1] = (x >> 8) & 0xff;
+    c[2] = (x >> 16) & 0xff;
+    c[3] = (x >> 24) & 0xff;
+}
 
 static void write_frame(Mat& frame, uint8_t* memory, uint32_t max_size)
 {
@@ -54,18 +66,50 @@ static void write_frame(Mat& frame, uint8_t* memory, uint32_t max_size)
     uint8_t* p = memory + sizeof(header);
 
     header.real_size = frame_size;
+    header.compressed = CompNone;
 
-    uint32_t compressed_size = compress_frame(frame.data, frame_size, p, max_size);
-    if (compressed_size == 0)
+    printf(" | %d", frame.type());
+
+    if (compression == CompLZ4)
+    {
+        printf(" | lz4");
+        store_le32(p, frame_size);
+        p += sizeof(uint32_t);
+        uint32_t compressed_size = compress_frame(frame.data, frame_size, p, max_size - sizeof(uint32_t));
+        if (compressed_size == 0)
+        {
+            p -= sizeof(uint32_t);
+            header.compressed = CompNone;
+        }
+        else
+        {
+            header.compressed_size = compressed_size + sizeof(uint32_t);
+            header.compressed = CompLZ4;
+        }
+    }
+    else if (compression == CompJPEG)
+    {
+        printf(" | jpeg");
+        const int JPEG_QUALITY = 75;
+        long unsigned int compressed_size = max_size;
+        unsigned char* compressedImage = p; //!< Memory is allocated by tjCompress2 if _jpegSize == 0
+
+        tjhandle jpegCompressor = tjInitCompress();
+
+        int ret = tjCompress2(jpegCompressor, frame.data, xres, 0, yres, TJPF_BGR,
+                              &compressedImage, &compressed_size, TJSAMP_444, JPEG_QUALITY,
+                              TJFLAG_FASTDCT | TJFLAG_NOREALLOC | TJFLAG_FORCESSE);
+
+        tjDestroy(jpegCompressor);
+
+        header.compressed = ret == 0 ? CompJPEG : CompNone;
+        header.compressed_size = compressed_size;
+    }
+
+    if (header.compressed == CompNone)
     {
         memcpy(p, frame.data, frame_size);
         header.compressed_size = frame_size;
-        header.compressed = false;
-    }
-    else
-    {
-        header.compressed_size = compressed_size;
-        header.compressed = true;
     }
 
     float change = (signed long)header.compressed_size - (signed long)header.real_size;
@@ -116,6 +160,7 @@ static void* grabber_thread(void *arg)
 
     mem_header_t mem_header;
     mem_header.memory_size = mem_size;
+    mem_header.format = compression;
     mem_header.xres = xres;
     mem_header.yres = yres;
     mem_header.current_slot = 0;
@@ -190,7 +235,7 @@ bool grabber_running(void)
     return running;
 }
 
-bool grabber_open(int index, int x_res, int y_res)
+bool grabber_open(int index, int x_res, int y_res, compression_t compType)
 {
     if(!cap.open(index))
     {
@@ -203,6 +248,9 @@ bool grabber_open(int index, int x_res, int y_res)
 
     cap.set(CV_CAP_PROP_FRAME_WIDTH, xres);
     cap.set(CV_CAP_PROP_FRAME_HEIGHT, yres);
+
+    printf("Capture resolution: %d x %d\n", xres, yres);
+    compression = compType;
 
     can_run = true;
 
