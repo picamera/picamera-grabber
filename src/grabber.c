@@ -196,12 +196,12 @@ bool grabber_open(int index, int x_res, int y_res)
         printf("Failed to open grabber\n");
         return false;
     }
-    
-    cap.set(CV_CAP_PROP_FRAME_WIDTH, xres);
-    cap.set(CV_CAP_PROP_FRAME_HEIGHT, yres);
 
     xres = x_res;
     yres = y_res;
+
+    cap.set(CV_CAP_PROP_FRAME_WIDTH, xres);
+    cap.set(CV_CAP_PROP_FRAME_HEIGHT, yres);
 
     can_run = true;
 
